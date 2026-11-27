@@ -661,7 +661,9 @@ namespace CodexScheduler
             {
                 string body = (bash ?? "").Replace("\r\n", "\n");
                 // 定义 codex 函数：Git Bash 里 command -v 认得函数，避免 PATH 里只有 codex.exe 时找不到
+                string tmpSh = Sh(tmp);
                 string script = "export PATH=\"" + Sh(_codexDir) + ":$PATH\"\n"
+                              + "export TMPDIR=\"" + tmpSh + "\" TEMP=\"" + tmpSh + "\" TMP=\"" + tmpSh + "\"\n"
                               + "codex() { \"" + Sh(Path.Combine(_codexDir, "codex.exe")) + "\" \"$@\"; }\n"
                               + "__cs_main() {\n" + body + "\n}\n__cs_main < /dev/null\n";
                 File.WriteAllText(inFile, script, new UTF8Encoding(false));
