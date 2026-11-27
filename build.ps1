@@ -19,12 +19,12 @@ if (-not (Test-Path $csc)) {
     exit 1
 }
 
-$src = Join-Path $root 'src\CodexScheduler.cs'
+$src = Join-Path $root 'src\*.cs'
 $ico = Join-Path $root 'src\app.ico'
 $man = Join-Path $root 'src\app.manifest'
 $exe = Join-Path $root $Out
 
-& $csc /nologo /target:winexe "/out:$exe" "/win32icon:$ico" "/win32manifest:$man" `
+& $csc /nologo /target:winexe /optimize+ /warn:4 "/out:$exe" "/win32icon:$ico" "/win32manifest:$man" `
     /r:System.dll /r:System.Core.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll `
     $src
 
