@@ -344,11 +344,11 @@ namespace CodexScheduler
                 var r = Ssh.Run(host, RemoteScripts.ListThreadsFor(host), 60000);
                 List<ThreadInfo> list = null;
                 string err = null;
+                string src = null;
                 if (r.Ok)
                 {
                     try
                     {
-                        string src;
                         list = RemoteScripts.ParseThreads(r.Out, out src);
                         if (src == null && list.Count == 0)
                             err = "读不到 ~/.codex/state_5.sqlite" + (string.IsNullOrWhiteSpace(r.Err) ? "" : "：" + r.Err.Trim());
@@ -370,7 +370,7 @@ namespace CodexScheduler
                         return;
                     }
                     _threads = list;
-                    Store.Log("会话列表 OK（" + host + "）：" + list.Count + " 个");
+                    Store.Log("会话列表 OK（" + host + "）：" + list.Count + " 个" + (string.IsNullOrEmpty(src) ? "" : " [" + src + "]"));
                     SetStatus("已连接 " + label + " · " + list.Count + " 个会话", StatusKind.Ok);
                     FillThreadList();
                     FillJobs();

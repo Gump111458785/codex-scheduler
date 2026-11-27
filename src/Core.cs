@@ -723,22 +723,61 @@ namespace CodexScheduler
         public static string ListThreads(string python, string codexHomeExpr)
         {
             return (PathPrefix + @"
-__PY__ - <<'PYEOF'
-import sqlite3, os, json, sys
+PYTHONIOENCODING=utf-8 __PY__ -X utf8 - <<'PYEOF'
+import sqlite3, os, json, sys, shutil, tempfile
+
 base = __BASE__
-out = []
+db = os.path.join(base, 'state_5.sqlite')
+SQL = ""select id, coalesce(nullif(name,''),''), coalesce(title,''), coalesce(updated_at,0), coalesce(source,''), coalesce(tokens_used,0) from threads where archived=0 order by updated_at desc""
+
+def q(con):
+    return con.cursor().execute(SQL).fetchall()
+
+rows = None
 src = None
+errs = []
+
+# 1) 直接只读打开（sqlite 是懒打开的，必须真的查一次才知道行不行）
 try:
-    con = sqlite3.connect('file:%s/state_5.sqlite?mode=ro' % base, uri=True)
-    cur = con.cursor()
-    rows = cur.execute(""select id, coalesce(nullif(name,''),''), coalesce(title,''), coalesce(updated_at,0), coalesce(source,''), coalesce(tokens_used,0) from threads where archived=0 order by updated_at desc"").fetchall()
+    rows = q(sqlite3.connect('file:%s?mode=ro' % db, uri=True))
+    src = 'state_5.sqlite'
+except Exception as e:
+    errs.append('ro=%s' % e)
+
+# 2) 复制一份副本（应对数据库被 Codex 桌面版独占）
+if rows is None:
+    try:
+        d = tempfile.mkdtemp(prefix='cs-db-')
+        for suf in ('', '-wal', '-shm'):
+            s = db + suf
+            if os.path.exists(s):
+                shutil.copy2(s, os.path.join(d, 'state_5.sqlite' + suf))
+        c2 = sqlite3.connect(os.path.join(d, 'state_5.sqlite'))
+        try:
+            rows = q(c2)
+            src = 'state_5.sqlite(copy)'
+        finally:
+            c2.close()
+            shutil.rmtree(d, ignore_errors=True)
+    except Exception as e:
+        errs.append('copy=%s' % e)
+
+# 3) immutable（忽略 WAL/-shm，只读快照）
+if rows is None:
+    try:
+        rows = q(sqlite3.connect('file:%s?mode=ro&immutable=1' % db, uri=True))
+        src = 'state_5.sqlite(immutable)'
+    except Exception as e:
+        errs.append('immutable=%s' % e)
+
+out = []
+if rows is None:
+    sys.stderr.write('state db failed: %s (db=%s)\n' % (' | '.join(errs), db))
+else:
     for r in rows:
         title = ' '.join((r[2] or '').split())
         out.append({'id': r[0], 'name': (r[1] or '').strip() or title[:48] or r[0][:8],
                     'updatedAt': int(r[3] or 0), 'source': r[4] or '', 'tokens': int(r[5] or 0)})
-    src = 'state_5.sqlite'
-except Exception as e:
-    sys.stderr.write('state db failed: %s\n' % e)
 print(json.dumps({'source': src, 'threads': out}, ensure_ascii=False))
 PYEOF
 ").Replace("__PY__", python).Replace("__BASE__", codexHomeExpr);
