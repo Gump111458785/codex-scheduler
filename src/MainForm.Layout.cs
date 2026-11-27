@@ -118,7 +118,7 @@ namespace CodexScheduler
             _tip.SetToolTip(btnPause, "暂停后所有定时任务都不会触发，手动执行不受影响");
             h.Controls.Add(btnPause, 4, 0);
 
-            var lh = Ui.Lbl("SSH 主机", Theme.Muted, Theme.Base);
+            var lh = Ui.Lbl("主机", Theme.Muted, Theme.Base);
             lh.Margin = new Padding(S(10), 0, S(6), 0);
             h.Controls.Add(lh, 5, 0);
 
@@ -132,7 +132,7 @@ namespace CodexScheduler
                 else if (e.KeyCode == Keys.Escape) { e.Handled = true; e.SuppressKeyPress = true; txtHost.Text = Ssh.Host; }
             };
             txtHost.Leave += delegate { ApplyHost(false); };
-            _tip.SetToolTip(txtHost, "~/.ssh/config 里的主机别名，或 user@host；回车连接");
+            _tip.SetToolTip(txtHost, "~/.ssh/config 里的主机别名，或 user@host；填 local 表示本机电脑。回车连接");
             h.Controls.Add(txtHost, 6, 0);
 
             btnConnect = Ui.Btn("连接", BtnKind.Secondary);

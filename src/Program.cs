@@ -214,6 +214,9 @@ namespace CodexScheduler
             Check("线程 ID 注入被拒", !Ssh.IsValidThreadId("abc'; rm -rf ~; '"), null);
             Check("主机名合法", Ssh.IsValidHost("cad-3-5090-fgy") && Ssh.IsValidHost("user@10.0.0.2"), null);
             Check("主机名注入被拒", !Ssh.IsValidHost("-oProxyCommand=calc") && !Ssh.IsValidHost("a b") && !Ssh.IsValidHost("a&calc"), null);
+            Check("识别本机主机名", LocalShell.IsLocal("local") && LocalShell.IsLocal(" 本机 ") && !LocalShell.IsLocal("cad-3-5090-fgy"), null);
+            Check("本机主机名可保存", Ssh.IsValidHost("local"), null);
+            _sb.AppendLine("INFO  本机组件：" + LocalShell.Describe());
 
             try
             {
@@ -234,7 +237,7 @@ namespace CodexScheduler
             }
             catch (Exception ex) { Check("任务 JSON 往返", false, ex.Message); }
 
-            var r = Ssh.Run(Ssh.Host, RemoteScripts.ListThreads(), 60000);
+            var r = Ssh.Run(Ssh.Host, RemoteScripts.ListThreadsFor(Ssh.Host), 60000);
             if (r.Ok)
             {
                 try

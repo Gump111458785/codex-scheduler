@@ -55,6 +55,24 @@ codex queue --thread <会话id> --message <内容> --resume
 | F5 | 刷新会话列表 |
 | 任务列表里 Enter / Delete / 空格 | 编辑 / 删除 / 暂停或启用 |
 
+## 连本机（不走 SSH）
+
+主机框里填 **`local`**（也认 `localhost`、`本机`、`.`）就切到本机模式：程序不再 SSH，直接在本机执行同一套命令，读写本机 `~/.codex`。
+
+三个前提，缺哪个启动时会明确提示：
+
+| 依赖 | 说明 |
+|---|---|
+| Git for Windows | 提供 `bash.exe`；程序会自动在 PATH、`Program Files\Git`、`LocalAppData\Programs\Git` 里找 |
+| Python 3 | 读会话列表用；PATH 里的 `python.exe`，或 `C:\Python3*` |
+| Codex CLI | 优先用**桌面版 MSIX 包内置的** `app\resources\codex.exe`（当前 0.167），其次找 PATH 里的 `codex` |
+
+本机模式下的注意点：
+
+- 本机 CLI 与远端是两套独立环境（这边的会话、额度、配置都算本机的）
+- 任务会记住自己发往哪台主机；切换顶栏主机只影响新建的任务
+- `--selftest` 里的「本机组件」一行会打印检测到的三个路径，方便排查
+
 ## 数据文件
 
 都在 exe 同级的 `data` 目录（不可写时退到 `%APPDATA%\CodexScheduler`），可以从「运行日志 → 打开数据目录」直接打开：

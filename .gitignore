@@ -8,3 +8,6 @@ tmp/
 .vs/
 bin/
 obj/
+
+# 提交时用的临时说明文件
+commit-msg.txt

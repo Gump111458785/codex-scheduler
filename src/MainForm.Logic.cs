@@ -337,10 +337,11 @@ namespace CodexScheduler
         {
             int seq = ++_refreshSeq;
             string host = Ssh.Host;
-            SetStatus("正在读取 " + host + " 的会话…", StatusKind.Busy);
+            string label = LocalShell.IsLocal(host) ? "本地电脑" : host;
+            SetStatus("正在读取 " + label + " 的会话…", StatusKind.Busy);
             Task.Factory.StartNew(delegate
             {
-                var r = Ssh.Run(host, RemoteScripts.ListThreads(), 60000);
+                var r = Ssh.Run(host, RemoteScripts.ListThreadsFor(host), 60000);
                 List<ThreadInfo> list = null;
                 string err = null;
                 if (r.Ok)
@@ -350,13 +351,13 @@ namespace CodexScheduler
                         string src;
                         list = RemoteScripts.ParseThreads(r.Out, out src);
                         if (src == null && list.Count == 0)
-                            err = "远端读不到 ~/.codex/state_5.sqlite" + (string.IsNullOrWhiteSpace(r.Err) ? "" : "：" + r.Err.Trim());
+                            err = "读不到 ~/.codex/state_5.sqlite" + (string.IsNullOrWhiteSpace(r.Err) ? "" : "：" + r.Err.Trim());
                     }
                     catch (Exception ex) { err = "解析失败：" + ex.Message; }
                 }
                 else
                 {
-                    err = r.TimedOut ? "连接超时" : (string.IsNullOrWhiteSpace(r.Err) ? ("ssh 退出码 " + r.Code) : r.Err.Trim());
+                    err = r.TimedOut ? "连接超时" : (string.IsNullOrWhiteSpace(r.Err) ? ("退出码 " + r.Code) : r.Err.Trim());
                 }
 
                 UI(delegate
@@ -365,12 +366,12 @@ namespace CodexScheduler
                     if (err != null)
                     {
                         Store.Log("读取会话失败（" + host + "）：" + Ui.Shorten(err, 300));
-                        SetStatus("连不上 " + host + "：" + err, StatusKind.Bad);
+                        SetStatus((LocalShell.IsLocal(host) ? "本机读取失败：" : "连不上 " + host + "：") + err, StatusKind.Bad);
                         return;
                     }
                     _threads = list;
                     Store.Log("会话列表 OK（" + host + "）：" + list.Count + " 个");
-                    SetStatus("已连接 " + host + " · " + list.Count + " 个会话", StatusKind.Ok);
+                    SetStatus("已连接 " + label + " · " + list.Count + " 个会话", StatusKind.Ok);
                     FillThreadList();
                     FillJobs();
                     UpdateSummary();
@@ -936,7 +937,9 @@ namespace CodexScheduler
             var j = BuildJobFromForm();
             if (j.Threads.Length == 0) { Info("请先在左侧勾选会话。"); return; }
             var sb = new StringBuilder();
-            sb.AppendLine("# 通过 ssh " + Ssh.Host + " 依次执行（每个会话一条，间隔约 1 秒），不会真的发送：");
+            sb.AppendLine(LocalShell.IsLocal(Ssh.Host)
+                ? "# 在本机依次执行（每个会话一条，间隔约 1 秒），不会真的发送："
+                : "# 通过 ssh " + Ssh.Host + " 依次执行（每个会话一条，间隔约 1 秒），不会真的发送：");
             foreach (var id in j.Threads.Take(8))
                 sb.AppendLine("codex queue --thread " + id + " --message \"$msg\" --resume");
             if (j.Threads.Length > 8) sb.AppendLine("# … 其余 " + (j.Threads.Length - 8) + " 个会话同理");

@@ -371,6 +371,7 @@ namespace CodexScheduler
 
         public static bool IsValidHost(string h)
         {
+            if (LocalShell.IsLocal(h)) return true;
             return !string.IsNullOrEmpty(h) && h.Length <= 255 && !h.StartsWith("-") && HostRe.IsMatch(h);
         }
 
@@ -394,6 +395,9 @@ namespace CodexScheduler
         /// </summary>
         public static Result Run(string host, string bash, int timeoutMs)
         {
+            // 本机模式：不经过 SSH，直接在本机用 Git Bash 跑同一套脚本
+            if (LocalShell.IsLocal(host)) return LocalShell.Run(bash, timeoutMs);
+
             var res = new Result();
             if (!IsValidHost(host))
             {
@@ -461,7 +465,7 @@ namespace CodexScheduler
         }
 
         /// <summary>超时时连同 ssh.exe 一起结束，避免留下孤儿进程占着输出文件</summary>
-        static void KillTree(int pid)
+        internal static void KillTree(int pid)
         {
             try
             {
@@ -474,7 +478,7 @@ namespace CodexScheduler
             catch { }
         }
 
-        static string ReadShared(string path)
+        internal static string ReadShared(string path)
         {
             try
             {
@@ -486,7 +490,7 @@ namespace CodexScheduler
             catch { return ""; }
         }
 
-        static void TryDelete(string path)
+        internal static void TryDelete(string path)
         {
             for (int i = 0; i < 3; i++)
             {
@@ -494,6 +498,213 @@ namespace CodexScheduler
                 catch { Thread.Sleep(100); }
             }
         }
+    }
+
+    // ============================================================ 本机模式
+
+    /// <summary>
+    /// 本机模式：主机填 local / localhost / 本机 时，不经过 SSH，
+    /// 直接调用本机的 Git Bash + Codex CLI + Python 跑同一套脚本。
+    /// </summary>
+    public static class LocalShell
+    {
+        static bool _probed;
+        static string _bash, _codexDir, _python, _codexHome;
+
+        public static bool IsLocal(string host)
+        {
+            if (host == null) return false;
+            string h = host.Trim().ToLowerInvariant();
+            return h == "local" || h == "localhost" || h == "本机" || h == ".";
+        }
+
+        public static string BashPath { get { Probe(); return _bash; } }
+        public static string CodexDir { get { Probe(); return _codexDir; } }
+        public static string PythonPath { get { Probe(); return _python; } }
+        public static string CodexHome { get { Probe(); return _codexHome; } }
+
+        static void Probe()
+        {
+            if (_probed) return;
+            _probed = true;
+            _bash = FindBash();
+            _codexDir = FindCodexDir();
+            _python = FindPython();
+            _codexHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex").Replace('\\', '/');
+        }
+
+        /// <summary>缺少的组件名，齐了返回 null</summary>
+        public static string Missing()
+        {
+            Probe();
+            var miss = new List<string>();
+            if (_bash == null) miss.Add("Git Bash");
+            if (_codexDir == null) miss.Add("Codex CLI");
+            if (_python == null) miss.Add("Python 3");
+            return miss.Count == 0 ? null : string.Join("、", miss.ToArray());
+        }
+
+        public static string Describe()
+        {
+            string miss = Missing();
+            if (miss != null) return "本机缺少：" + miss;
+            return "本机就绪（" + _bash + " · " + _python + " · " + Path.Combine(_codexDir, "codex.exe") + "）";
+        }
+
+        static string FindBash()
+        {
+            var cands = new List<string>();
+            string gitExe = Which("git.exe");
+            if (gitExe != null)
+            {
+                string gitRoot = Path.GetDirectoryName(Path.GetDirectoryName(gitExe));
+                if (!string.IsNullOrEmpty(gitRoot)) cands.Add(Path.Combine(gitRoot, "bin", "bash.exe"));
+            }
+            cands.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Git", "bin", "bash.exe"));
+            cands.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Git", "bin", "bash.exe"));
+            cands.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Git", "bin", "bash.exe"));
+            foreach (var c in cands)
+            {
+                try { if (!string.IsNullOrEmpty(c) && File.Exists(c)) return c; } catch { }
+            }
+            return null;
+        }
+
+        static string FindCodexDir()
+        {
+            // 桌面版 MSIX 包里自带完整 CLI
+            try
+            {
+                string apps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsApps");
+                if (Directory.Exists(apps))
+                {
+                    var dirs = Directory.GetDirectories(apps, "OpenAI.Codex_*");
+                    Array.Sort(dirs);
+                    Array.Reverse(dirs);
+                    foreach (var d in dirs)
+                    {
+                        string exe = Path.Combine(d, "app", "resources", "codex.exe");
+                        if (File.Exists(exe)) return Path.GetDirectoryName(exe);
+                    }
+                }
+            }
+            catch { }
+            string c = Which("codex.exe");
+            if (c == null) c = Which("codex");
+            return c == null ? null : Path.GetDirectoryName(c);
+        }
+
+        static string FindPython()
+        {
+            string p = Which("python.exe");
+            if (p == null) p = Which("python");
+            if (p != null) return p;
+            try
+            {
+                var cands = new List<string>();
+                string local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Python");
+                if (Directory.Exists(local))
+                    foreach (var d in Directory.GetDirectories(local, "Python3*")) cands.Add(Path.Combine(d, "python.exe"));
+                foreach (var root in new string[] { "C:\\", "D:\\", "E:\\" })
+                {
+                    try
+                    {
+                        foreach (var d in Directory.GetDirectories(root, "Python3*")) cands.Add(Path.Combine(d, "python.exe"));
+                    }
+                    catch { }
+                }
+                foreach (var c in cands) if (File.Exists(c)) return c;
+            }
+            catch { }
+            return null;
+        }
+
+        static string Which(string name)
+        {
+            try
+            {
+                string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+                foreach (var dir in path.Split(';'))
+                {
+                    if (string.IsNullOrWhiteSpace(dir)) continue;
+                    try
+                    {
+                        string full = Path.Combine(dir.Trim(), name);
+                        if (File.Exists(full)) return full;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        public static Ssh.Result Run(string bash, int timeoutMs)
+        {
+            var res = new Ssh.Result();
+            string miss = Missing();
+            if (miss != null)
+            {
+                res.Code = 3;
+                res.Err = "本机模式缺少：" + miss;
+                return res;
+            }
+
+            string stamp = Guid.NewGuid().ToString("N");
+            string tmp = Paths.TmpDir;
+            try { if (!Directory.Exists(tmp)) Directory.CreateDirectory(tmp); } catch { tmp = Path.GetTempPath(); }
+            string inFile = Path.Combine(tmp, "cs-" + stamp + ".sh");
+            string outFile = Path.Combine(tmp, "cs-" + stamp + ".out");
+            string errFile = Path.Combine(tmp, "cs-" + stamp + ".err");
+
+            try
+            {
+                string body = (bash ?? "").Replace("\r\n", "\n");
+                // 定义 codex 函数：Git Bash 里 command -v 认得函数，避免 PATH 里只有 codex.exe 时找不到
+                string script = "export PATH=\"" + Sh(_codexDir) + ":$PATH\"\n"
+                              + "codex() { \"" + Sh(Path.Combine(_codexDir, "codex.exe")) + "\" \"$@\"; }\n"
+                              + "__cs_main() {\n" + body + "\n}\n__cs_main < /dev/null\n";
+                File.WriteAllText(inFile, script, new UTF8Encoding(false));
+
+                string cmd = "\"" + _bash + "\" -s < \"" + inFile + "\" 1> \"" + outFile + "\" 2> \"" + errFile + "\"";
+                var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
+                psi.Arguments = "/d /s /c \"" + cmd + "\"";
+                psi.CreateNoWindow = true;
+                psi.UseShellExecute = false;
+                psi.WindowStyle = ProcessWindowStyle.Hidden;
+
+                using (var p = Process.Start(psi))
+                {
+                    if (!p.WaitForExit(timeoutMs))
+                    {
+                        Ssh.KillTree(p.Id);
+                        try { p.WaitForExit(5000); } catch { }
+                        res.Code = 124;
+                        res.TimedOut = true;
+                        res.Err = "超时（" + (timeoutMs / 1000) + " 秒）";
+                    }
+                    else res.Code = p.ExitCode;
+                }
+
+                res.Out = Ssh.ReadShared(outFile);
+                string err = Ssh.ReadShared(errFile);
+                if (!string.IsNullOrEmpty(err)) res.Err = string.IsNullOrEmpty(res.Err) ? err : (res.Err + "\n" + err);
+            }
+            catch (Exception ex)
+            {
+                res.Code = 1;
+                res.Err = ex.Message;
+            }
+            finally
+            {
+                Ssh.TryDelete(inFile);
+                Ssh.TryDelete(outFile);
+                Ssh.TryDelete(errFile);
+            }
+            return res;
+        }
+
+        static string Sh(string winPath) { return (winPath ?? "").Replace('\\', '/'); }
     }
 
     // ============================================================ 远端脚本
@@ -504,10 +715,17 @@ namespace CodexScheduler
 
         public static string ListThreads()
         {
-            return PathPrefix + @"
-python3 - <<'PYEOF'
+            return ListThreads("python3", "os.path.expanduser('~/.codex')");
+        }
+
+        /// <param name="python">解释器：远端是 python3，本机是 python.exe 的完整路径</param>
+        /// <param name="codexHomeExpr">指向 ~/.codex 的 python 表达式</param>
+        public static string ListThreads(string python, string codexHomeExpr)
+        {
+            return (PathPrefix + @"
+__PY__ - <<'PYEOF'
 import sqlite3, os, json, sys
-base = os.path.expanduser('~/.codex')
+base = __BASE__
 out = []
 src = None
 try:
@@ -523,7 +741,15 @@ except Exception as e:
     sys.stderr.write('state db failed: %s\n' % e)
 print(json.dumps({'source': src, 'threads': out}, ensure_ascii=False))
 PYEOF
-";
+").Replace("__PY__", python).Replace("__BASE__", codexHomeExpr);
+        }
+
+        /// <summary>按主机类型选择远端还是本机的会话列表脚本</summary>
+        public static string ListThreadsFor(string host)
+        {
+            if (!LocalShell.IsLocal(host)) return ListThreads();
+            string py = LocalShell.PythonPath == null ? "python3" : ("\"" + LocalShell.PythonPath.Replace('\\', '/') + "\"");
+            return ListThreads(py, "r'" + LocalShell.CodexHome + "'");
         }
 
         /// <summary>threadId 必须先经过 Ssh.IsValidThreadId 校验（只含字母数字 _ -），这里才能安全地放进单引号</summary>
